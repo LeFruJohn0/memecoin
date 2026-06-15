@@ -241,11 +241,6 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
-          <span className="text-xs font-semibold text-green-400 tracking-wider uppercase bg-green-950/40 border border-green-800/50 px-2.5 py-0.5 rounded-full">
-            Helius Webhooks Connected
-          </span>
-        </div>
-      </header>
 
       {/* Main Body Grid */}
       <div className="flex-1 flex flex-col md:flex-row">
