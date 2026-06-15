@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { Connection } from '@solana/web3.js';
 import { initDb, getWallets, getPortfolio, updatePortfolio, getHoldings, saveHolding, deleteHolding, addTrade } from '../../../lib/db.js';
 import { getTransactionWithRetry, parseTransactionSwaps } from '../../../../cli/parser.js';
+import { executeRealCopyTrades } from '../../../lib/execution.js';
 
 export async function POST(req) {
   try {
@@ -171,6 +172,9 @@ export async function POST(req) {
 
           console.log(`[WEBHOOK] COPIED SELL SUCCESSFUL! Sold ${(sellFraction*100).toFixed(0)}% of [${tokenMint.slice(0,6)}] | PnL: ${netPnL.toFixed(4)} SOL (${pnlPercent.toFixed(2)}%)`);
         }
+
+        // Trigger on-chain copier to execute real trades
+        await executeRealCopyTrades(swap, targetWallet.address);
       }
     }
 

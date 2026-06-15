@@ -13,6 +13,7 @@ import {
   deleteHolding, 
   addTrade 
 } from '../src/lib/db.js';
+import { executeRealCopyTrades } from '../src/lib/execution.js';
 
 /**
  * Updates the live simulated portfolio database with a new trade.
@@ -240,6 +241,9 @@ export async function startMonitor() {
                 console.log(chalk.bold.gray(`  ⚪ NO ACTION: We are not holding token [${formattedMint}]`));
               }
             }
+
+            // Trigger real on-chain copy trading
+            await executeRealCopyTrades(swap, wallet.address);
           }
         } catch (err) {
           console.error(chalk.red(`[ERROR] Failed to process transaction ${signature}: ${err.message}`));

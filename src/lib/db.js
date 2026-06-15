@@ -67,6 +67,45 @@ export async function initDb() {
           buy_tx VARCHAR(100) NOT NULL,
           sell_tx VARCHAR(100) NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS execution_wallets (
+          address VARCHAR(50) PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          encrypted_private_key TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS copy_settings (
+          id SERIAL PRIMARY KEY,
+          target_wallet VARCHAR(50) REFERENCES wallets(address) ON DELETE CASCADE,
+          execution_wallet VARCHAR(50) REFERENCES execution_wallets(address) ON DELETE CASCADE,
+          copy_size DOUBLE PRECISION NOT NULL,
+          slippage_bps INTEGER DEFAULT 1000,
+          is_active BOOLEAN DEFAULT TRUE,
+          UNIQUE(target_wallet, execution_wallet)
+        );
+        CREATE TABLE IF NOT EXISTS real_holdings (
+          execution_wallet VARCHAR(50) REFERENCES execution_wallets(address) ON DELETE CASCADE,
+          mint VARCHAR(50) NOT NULL,
+          amount DOUBLE PRECISION NOT NULL,
+          sol_spent DOUBLE PRECISION NOT NULL,
+          entry_price DOUBLE PRECISION NOT NULL,
+          entry_time TIMESTAMP NOT NULL,
+          PRIMARY KEY (execution_wallet, mint)
+        );
+        CREATE TABLE IF NOT EXISTS real_trades (
+          id SERIAL PRIMARY KEY,
+          target_wallet VARCHAR(50),
+          execution_wallet VARCHAR(50) REFERENCES execution_wallets(address) ON DELETE CASCADE,
+          token_mint VARCHAR(50) NOT NULL,
+          buy_time TIMESTAMP NOT NULL,
+          sell_time TIMESTAMP,
+          sol_invested DOUBLE PRECISION,
+          sol_received DOUBLE PRECISION,
+          net_pnl DOUBLE PRECISION,
+          pnl_percent DOUBLE PRECISION,
+          buy_tx VARCHAR(100),
+          sell_tx VARCHAR(100),
+          status VARCHAR(20) DEFAULT 'OPEN'
+        );
       `);
 
       // Seed a default wallet if tables are empty
@@ -106,9 +145,23 @@ export async function initDb() {
 // Helper to read local JSON database
 function readLocalDb() {
   if (!fs.existsSync(dbPath)) {
-    fs.writeFileSync(dbPath, JSON.stringify({ wallets: [], portfolios: {}, holdings: {}, trades: {} }), 'utf8');
+    fs.writeFileSync(dbPath, JSON.stringify({ 
+      wallets: [], 
+      portfolios: {}, 
+      holdings: {}, 
+      trades: {},
+      executionWallets: [],
+      copySettings: [],
+      realHoldings: {},
+      realTrades: {}
+    }), 'utf8');
   }
-  return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+  const data = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+  if (!data.executionWallets) data.executionWallets = [];
+  if (!data.copySettings) data.copySettings = [];
+  if (!data.realHoldings) data.realHoldings = {};
+  if (!data.realTrades) data.realTrades = {};
+  return data;
 }
 
 // Helper to write local JSON database
@@ -332,5 +385,281 @@ export async function addTrade(walletAddress, trade) {
       sellHash: trade.sellHash
     });
     writeLocalDb(data);
+  }
+}
+
+/**
+ * Retrieves all imported execution wallets.
+ */
+export async function getExecutionWallets() {
+  if (pool) {
+    const res = await pool.query('SELECT address, name, encrypted_private_key AS "encryptedPrivateKey" FROM execution_wallets ORDER BY created_at ASC');
+    return res.rows;
+  } else {
+    const data = readLocalDb();
+    return data.executionWallets;
+  }
+}
+
+/**
+ * Saves/updates an execution wallet.
+ */
+export async function addExecutionWallet(address, name, encryptedPrivateKey) {
+  if (pool) {
+    await pool.query(`
+      INSERT INTO execution_wallets (address, name, encrypted_private_key) 
+      VALUES ($1, $2, $3) 
+      ON CONFLICT (address) 
+      DO UPDATE SET name = $2, encrypted_private_key = $3
+    `, [address, name, encryptedPrivateKey]);
+  } else {
+    const data = readLocalDb();
+    const existingIdx = data.executionWallets.findIndex(w => w.address === address);
+    if (existingIdx > -1) {
+      data.executionWallets[existingIdx] = { address, name, encryptedPrivateKey };
+    } else {
+      data.executionWallets.push({ address, name, encryptedPrivateKey });
+    }
+    writeLocalDb(data);
+  }
+}
+
+/**
+ * Deletes an execution wallet.
+ */
+export async function deleteExecutionWallet(address) {
+  if (pool) {
+    await pool.query('DELETE FROM execution_wallets WHERE address = $1', [address]);
+  } else {
+    const data = readLocalDb();
+    data.executionWallets = data.executionWallets.filter(w => w.address !== address);
+    data.copySettings = data.copySettings.filter(s => s.executionWallet !== address);
+    delete data.realHoldings[address];
+    delete data.realTrades[address];
+    writeLocalDb(data);
+  }
+}
+
+/**
+ * Retrieves all copy settings mappings.
+ */
+export async function getCopySettings() {
+  if (pool) {
+    const res = await pool.query(`
+      SELECT id, target_wallet AS "targetWallet", execution_wallet AS "executionWallet", 
+             copy_size AS "copySize", slippage_bps AS "slippageBps", is_active AS "isActive" 
+      FROM copy_settings
+    `);
+    return res.rows;
+  } else {
+    const data = readLocalDb();
+    return data.copySettings;
+  }
+}
+
+/**
+ * Saves/updates a copy setting.
+ */
+export async function saveCopySetting(targetWallet, executionWallet, copySize, slippageBps, isActive) {
+  if (pool) {
+    await pool.query(`
+      INSERT INTO copy_settings (target_wallet, execution_wallet, copy_size, slippage_bps, is_active)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (target_wallet, execution_wallet)
+      DO UPDATE SET copy_size = $3, slippage_bps = $4, is_active = $5
+    `, [targetWallet, executionWallet, copySize, slippageBps, isActive]);
+  } else {
+    const data = readLocalDb();
+    const existingIdx = data.copySettings.findIndex(
+      s => s.targetWallet === targetWallet && s.executionWallet === executionWallet
+    );
+    const item = { targetWallet, executionWallet, copySize: parseFloat(copySize), slippageBps: parseInt(slippageBps, 10), isActive };
+    if (existingIdx > -1) {
+      data.copySettings[existingIdx] = item;
+    } else {
+      data.copySettings.push(item);
+    }
+    writeLocalDb(data);
+  }
+}
+
+/**
+ * Deletes a copy setting mapping.
+ */
+export async function deleteCopySetting(targetWallet, executionWallet) {
+  if (pool) {
+    await pool.query('DELETE FROM copy_settings WHERE target_wallet = $1 AND execution_wallet = $2', [targetWallet, executionWallet]);
+  } else {
+    const data = readLocalDb();
+    data.copySettings = data.copySettings.filter(
+      s => !(s.targetWallet === targetWallet && s.executionWallet === executionWallet)
+    );
+    writeLocalDb(data);
+  }
+}
+
+/**
+ * Retrieves completed real trades for an execution wallet.
+ */
+export async function getRealTrades(executionWallet) {
+  if (pool) {
+    const res = await pool.query(`
+      SELECT id, target_wallet AS "targetWallet", execution_wallet AS "executionWallet", 
+             token_mint AS "tokenMint", buy_time AS "buyTime", sell_time AS "sellTime", 
+             sol_invested AS "solInvested", sol_received AS "solReceived", 
+             net_pnl AS "netPnL", pnl_percent AS "pnlPercent", 
+             buy_tx AS "buyHash", sell_tx AS "sellHash", status
+      FROM real_trades
+      WHERE execution_wallet = $1
+      ORDER BY buy_time DESC
+    `, [executionWallet]);
+    return res.rows;
+  } else {
+    const data = readLocalDb();
+    return data.realTrades[executionWallet] || [];
+  }
+}
+
+/**
+ * Adds an initial real trade log (Buy entry). Returns the auto-increment ID.
+ */
+export async function addRealTrade(trade) {
+  if (pool) {
+    const res = await pool.query(`
+      INSERT INTO real_trades (target_wallet, execution_wallet, token_mint, buy_time, sol_invested, buy_tx, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'OPEN')
+      RETURNING id
+    `, [
+      trade.targetWallet,
+      trade.executionWallet,
+      trade.tokenMint,
+      new Date(trade.buyTime),
+      trade.solInvested,
+      trade.buyHash
+    ]);
+    return res.rows[0].id;
+  } else {
+    const data = readLocalDb();
+    if (!data.realTrades[trade.executionWallet]) {
+      data.realTrades[trade.executionWallet] = [];
+    }
+    const newId = data.realTrades[trade.executionWallet].length + 1;
+    data.realTrades[trade.executionWallet].unshift({
+      id: newId,
+      targetWallet: trade.targetWallet,
+      executionWallet: trade.executionWallet,
+      tokenMint: trade.tokenMint,
+      buyTime: new Date(trade.buyTime).toISOString(),
+      sellTime: null,
+      solInvested: trade.solInvested,
+      solReceived: null,
+      netPnL: null,
+      pnlPercent: null,
+      buyHash: trade.buyHash,
+      sellHash: null,
+      status: 'OPEN'
+    });
+    writeLocalDb(data);
+    return newId;
+  }
+}
+
+/**
+ * Updates a real trade log with exit details (Sell execute).
+ */
+export async function updateRealTrade(id, updateFields) {
+  if (pool) {
+    await pool.query(`
+      UPDATE real_trades
+      SET sell_time = $1, sol_received = $2, net_pnl = $3, pnl_percent = $4, sell_tx = $5, status = $6
+      WHERE id = $7
+    `, [
+      new Date(updateFields.sellTime),
+      updateFields.solReceived,
+      updateFields.netPnL,
+      updateFields.pnlPercent,
+      updateFields.sellHash,
+      updateFields.status,
+      id
+    ]);
+  } else {
+    const data = readLocalDb();
+    // Search in all execution wallets' trades for simplicity
+    for (const key in data.realTrades) {
+      const idx = data.realTrades[key].findIndex(t => t.id === id);
+      if (idx > -1) {
+        data.realTrades[key][idx] = {
+          ...data.realTrades[key][idx],
+          sellTime: new Date(updateFields.sellTime).toISOString(),
+          solReceived: updateFields.solReceived,
+          netPnL: updateFields.netPnL,
+          pnlPercent: updateFields.pnlPercent,
+          sellHash: updateFields.sellHash,
+          status: updateFields.status
+        };
+        break;
+      }
+    }
+    writeLocalDb(data);
+  }
+}
+
+/**
+ * Gets active real holdings for an execution wallet.
+ */
+export async function getRealHoldings(executionWallet) {
+  if (pool) {
+    const res = await pool.query(`
+      SELECT mint, amount, sol_spent AS "solSpent", entry_price AS "entryPrice", entry_time AS "entryTime" 
+      FROM real_holdings 
+      WHERE execution_wallet = $1
+    `, [executionWallet]);
+    return res.rows;
+  } else {
+    const data = readLocalDb();
+    const holdings = data.realHoldings[executionWallet] || {};
+    return Object.values(holdings);
+  }
+}
+
+/**
+ * Saves or updates a real token holding.
+ */
+export async function saveRealHolding(executionWallet, mint, amount, solSpent, entryPrice, entryTime) {
+  if (pool) {
+    await pool.query(`
+      INSERT INTO real_holdings (execution_wallet, mint, amount, sol_spent, entry_price, entry_time)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (execution_wallet, mint)
+      DO UPDATE SET amount = $3, sol_spent = $4, entry_price = $5, entry_time = $6
+    `, [executionWallet, mint, amount, solSpent, entryPrice, new Date(entryTime)]);
+  } else {
+    const data = readLocalDb();
+    if (!data.realHoldings[executionWallet]) {
+      data.realHoldings[executionWallet] = {};
+    }
+    data.realHoldings[executionWallet][mint] = {
+      mint,
+      amount,
+      solSpent,
+      entryPrice,
+      entryTime: new Date(entryTime).toISOString()
+    };
+    writeLocalDb(data);
+  }
+}
+
+/**
+ * Deletes a real token holding.
+ */
+export async function deleteRealHolding(executionWallet, mint) {
+  if (pool) {
+    await pool.query('DELETE FROM real_holdings WHERE execution_wallet = $1 AND mint = $2', [executionWallet, mint]);
+  } else {
+    const data = readLocalDb();
+    if (data.realHoldings[executionWallet]) {
+      delete data.realHoldings[executionWallet][mint];
+      writeLocalDb(data);
+    }
   }
 }
