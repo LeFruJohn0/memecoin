@@ -8,8 +8,17 @@ let pool = null;
 // Initialize Postgres connection pool if DATABASE_URL is present
 if (process.env.DATABASE_URL) {
   const { Pool } = pg;
+  let connectionString = process.env.DATABASE_URL;
+  try {
+    const parsedUrl = new URL(connectionString);
+    parsedUrl.searchParams.delete('sslmode');
+    connectionString = parsedUrl.toString();
+  } catch (err) {
+    // fallback if not a valid URL format
+  }
+
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString,
     ssl: {
       rejectUnauthorized: false
     }
