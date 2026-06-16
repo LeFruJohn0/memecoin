@@ -60,13 +60,21 @@ export async function executeRealCopyTrades(swap, targetWalletAddress) {
             continue;
           }
 
-          const buySizeSol = mapping.copySize;
-          const inAmountLamports = Math.floor(buySizeSol * 1e9);
           const slippagePct = Math.round(mapping.slippageBps / 100);
 
-          // Pre-check: ensure execution wallet has enough SOL (copySize + ~0.005 for fees)
+          // Fetch execution wallet balance — used as the capital reference for risk-scaling
           const walletBalance = await connection.getBalance(new PublicKey(execWallet.address));
           const walletBalanceSol = walletBalance / 1e9;
+
+          // Risk-scaled sizing: mirror the same % of capital the target risked, clamped to min/max
+          const minCopySize = mapping.minCopySize ?? mapping.copySize;
+          const maxCopySize = mapping.maxCopySize ?? mapping.copySize;
+          const targetRiskRatio = swap.solAmount / (swap.walletSolBalanceBefore || 1.0);
+          const rawSize = targetRiskRatio * walletBalanceSol;
+          const buySizeSol = Math.max(minCopySize, Math.min(maxCopySize, rawSize));
+          const inAmountLamports = Math.floor(buySizeSol * 1e9);
+
+          // Pre-check: ensure execution wallet has enough SOL
           if (walletBalanceSol < buySizeSol + 0.005) {
             console.warn(`[ON-CHAIN COPIER] Skipping BUY — insufficient SOL in "${execWallet.name}": ${walletBalanceSol.toFixed(4)} SOL (need ${(buySizeSol + 0.005).toFixed(4)} SOL)`);
             continue;

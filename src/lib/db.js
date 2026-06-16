@@ -78,10 +78,14 @@ export async function initDb() {
           target_wallet VARCHAR(50) REFERENCES wallets(address) ON DELETE CASCADE,
           execution_wallet VARCHAR(50) REFERENCES execution_wallets(address) ON DELETE CASCADE,
           copy_size DOUBLE PRECISION NOT NULL,
+          min_copy_size DOUBLE PRECISION DEFAULT 0.05,
+          max_copy_size DOUBLE PRECISION DEFAULT 0.10,
           slippage_bps INTEGER DEFAULT 1000,
           is_active BOOLEAN DEFAULT TRUE,
           UNIQUE(target_wallet, execution_wallet)
         );
+        ALTER TABLE copy_settings ADD COLUMN IF NOT EXISTS min_copy_size DOUBLE PRECISION DEFAULT 0.05;
+        ALTER TABLE copy_settings ADD COLUMN IF NOT EXISTS max_copy_size DOUBLE PRECISION DEFAULT 0.10;
         CREATE TABLE IF NOT EXISTS real_holdings (
           execution_wallet VARCHAR(50) REFERENCES execution_wallets(address) ON DELETE CASCADE,
           mint VARCHAR(50) NOT NULL,
@@ -455,8 +459,9 @@ export async function deleteExecutionWallet(address) {
 export async function getCopySettings() {
   if (pool) {
     const res = await pool.query(`
-      SELECT id, target_wallet AS "targetWallet", execution_wallet AS "executionWallet", 
-             copy_size AS "copySize", slippage_bps AS "slippageBps", is_active AS "isActive" 
+      SELECT id, target_wallet AS "targetWallet", execution_wallet AS "executionWallet",
+             copy_size AS "copySize", min_copy_size AS "minCopySize", max_copy_size AS "maxCopySize",
+             slippage_bps AS "slippageBps", is_active AS "isActive"
       FROM copy_settings
     `);
     return res.rows;
@@ -469,20 +474,27 @@ export async function getCopySettings() {
 /**
  * Saves/updates a copy setting.
  */
-export async function saveCopySetting(targetWallet, executionWallet, copySize, slippageBps, isActive) {
+export async function saveCopySetting(targetWallet, executionWallet, copySize, minCopySize, maxCopySize, slippageBps, isActive) {
   if (pool) {
     await pool.query(`
-      INSERT INTO copy_settings (target_wallet, execution_wallet, copy_size, slippage_bps, is_active)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO copy_settings (target_wallet, execution_wallet, copy_size, min_copy_size, max_copy_size, slippage_bps, is_active)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       ON CONFLICT (target_wallet, execution_wallet)
-      DO UPDATE SET copy_size = $3, slippage_bps = $4, is_active = $5
-    `, [targetWallet, executionWallet, copySize, slippageBps, isActive]);
+      DO UPDATE SET copy_size = $3, min_copy_size = $4, max_copy_size = $5, slippage_bps = $6, is_active = $7
+    `, [targetWallet, executionWallet, copySize, minCopySize, maxCopySize, slippageBps, isActive]);
   } else {
     const data = readLocalDb();
     const existingIdx = data.copySettings.findIndex(
       s => s.targetWallet === targetWallet && s.executionWallet === executionWallet
     );
-    const item = { targetWallet, executionWallet, copySize: parseFloat(copySize), slippageBps: parseInt(slippageBps, 10), isActive };
+    const item = {
+      targetWallet, executionWallet,
+      copySize: parseFloat(copySize),
+      minCopySize: parseFloat(minCopySize),
+      maxCopySize: parseFloat(maxCopySize),
+      slippageBps: parseInt(slippageBps, 10),
+      isActive
+    };
     if (existingIdx > -1) {
       data.copySettings[existingIdx] = item;
     } else {

@@ -14,21 +14,22 @@ export async function GET() {
 export async function POST(req) {
   try {
     await initDb();
-    const { targetWallet, executionWallet, copySize, slippageBps, isActive } = await req.json();
+    const { targetWallet, executionWallet, minCopySize, maxCopySize, slippageBps, isActive } = await req.json();
 
-    if (!targetWallet || !executionWallet || copySize === undefined) {
-      return NextResponse.json({ success: false, error: 'Target wallet, execution wallet, and copy size are required.' }, { status: 400 });
+    if (!targetWallet || !executionWallet || minCopySize === undefined || maxCopySize === undefined) {
+      return NextResponse.json({ success: false, error: 'Target wallet, execution wallet, min size, and max size are required.' }, { status: 400 });
     }
 
-    const size = parseFloat(copySize);
-    if (isNaN(size) || size <= 0) {
-      return NextResponse.json({ success: false, error: 'Copy size must be a positive number.' }, { status: 400 });
-    }
+    const min = parseFloat(minCopySize);
+    const max = parseFloat(maxCopySize);
+    if (isNaN(min) || min <= 0) return NextResponse.json({ success: false, error: 'Min size must be a positive number.' }, { status: 400 });
+    if (isNaN(max) || max <= 0) return NextResponse.json({ success: false, error: 'Max size must be a positive number.' }, { status: 400 });
+    if (min > max) return NextResponse.json({ success: false, error: 'Min size cannot be greater than max size.' }, { status: 400 });
 
     const slippage = slippageBps ? parseInt(slippageBps, 10) : 1000;
-    const active = isActive !== false; // defaults to true
+    const active = isActive !== false;
 
-    await saveCopySetting(targetWallet, executionWallet, size, slippage, active);
+    await saveCopySetting(targetWallet, executionWallet, min, min, max, slippage, active);
     return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

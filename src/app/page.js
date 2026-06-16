@@ -69,7 +69,8 @@ export default function Dashboard() {
   // Copy Settings Mapping inputs
   const [mappingTarget, setMappingTarget] = useState('');
   const [mappingExec, setMappingExec] = useState('');
-  const [mappingSize, setMappingSize] = useState('0.05');
+  const [mappingMinSize, setMappingMinSize] = useState('0.05');
+  const [mappingMaxSize, setMappingMaxSize] = useState('0.10');
   const [mappingSlippage, setMappingSlippage] = useState('1000');
   const [saveMappingLoading, setSaveMappingLoading] = useState(false);
 
@@ -362,7 +363,8 @@ export default function Dashboard() {
         body: JSON.stringify({
           targetWallet: mappingTarget,
           executionWallet: mappingExec,
-          copySize: mappingSize,
+          minCopySize: mappingMinSize,
+          maxCopySize: mappingMaxSize,
           slippageBps: mappingSlippage
         })
       });
@@ -375,7 +377,8 @@ export default function Dashboard() {
         }
         setMappingTarget('');
         setMappingExec('');
-        setMappingSize('0.05');
+        setMappingMinSize('0.05');
+        setMappingMaxSize('0.10');
         setMappingSlippage('1000');
       } else {
         setError(data.error);
@@ -787,16 +790,31 @@ export default function Dashboard() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[10px] text-slate-450 mb-0.5 uppercase tracking-wider font-semibold">Size (SOL)</label>
+                      <label className="block text-[10px] text-slate-450 mb-0.5 uppercase tracking-wider font-semibold">Min Size (SOL)</label>
                       <input
                         type="number"
                         step="0.001"
+                        min="0.001"
                         required
-                        value={mappingSize}
-                        onChange={(e) => setMappingSize(e.target.value)}
+                        value={mappingMinSize}
+                        onChange={(e) => setMappingMinSize(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none"
                       />
                     </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-450 mb-0.5 uppercase tracking-wider font-semibold">Max Size (SOL)</label>
+                      <input
+                        type="number"
+                        step="0.001"
+                        min="0.001"
+                        required
+                        value={mappingMaxSize}
+                        onChange={(e) => setMappingMaxSize(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2">
                     <div>
                       <label className="block text-[10px] text-slate-450 mb-0.5 uppercase tracking-wider font-semibold">Slippage</label>
                       <select
@@ -1712,7 +1730,8 @@ export default function Dashboard() {
                                       {mapping.targetWallet}
                                     </p>
                                     <div className="mt-3 flex space-x-4 text-xs text-slate-400">
-                                      <span>Size: <strong className="text-cyan-400">{mapping.copySize} SOL</strong></span>
+                                      <span>Min: <strong className="text-cyan-400">{mapping.minCopySize ?? mapping.copySize} SOL</strong></span>
+                                      <span>Max: <strong className="text-cyan-400">{mapping.maxCopySize ?? mapping.copySize} SOL</strong></span>
                                       <span>Slippage: <strong className="text-cyan-400">{mapping.slippageBps / 100}%</strong></span>
                                     </div>
                                   </div>
