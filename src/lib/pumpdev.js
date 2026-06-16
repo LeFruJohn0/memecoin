@@ -94,20 +94,32 @@ export async function sendViaJito(signedTxOrPumpDevResult, keypair, connection, 
   tipTx.sign(keypair);
   const tipTxBase58 = bs58.encode(tipTx.serialize());
 
-  // Submit bundle
-  const res = await fetch(JITO_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0', id: 1,
-      method: 'sendBundle',
-      params: [[tradeTxBase58, tipTxBase58]]
-    })
-  });
-  const json = await res.json();
-  if (json.error) throw new Error(`Jito error: ${json.error.message}`);
+  // Try Jito bundle first, fall back to direct RPC if unreachable
+  try {
+    const res = await fetch(JITO_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1,
+        method: 'sendBundle',
+        params: [[tradeTxBase58, tipTxBase58]]
+      }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const json = await res.json();
+    if (!json.error) {
+      console.log(`[JITO] Bundle sent. Sig: ${tradeSignature}`);
+      return tradeSignature;
+    }
+    console.warn(`[JITO] Error: ${json.error.message}, falling back to RPC...`);
+  } catch (err) {
+    console.warn(`[JITO] Unreachable (${err.message}), falling back to RPC...`);
+  }
 
-  console.log(`[JITO] Bundle sent. Sig: ${tradeSignature}`);
+  // RPC fallback — send trade tx directly, skip Jito tip
+  const tradeTxBytes = Buffer.from(bs58.decode(tradeTxBase58));
+  await connection.sendRawTransaction(tradeTxBytes, { skipPreflight: true, maxRetries: 3 });
+  console.log(`[RPC] Trade sent. Sig: ${tradeSignature}`);
   return tradeSignature;
 }
 
