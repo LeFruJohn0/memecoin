@@ -6,7 +6,6 @@ import {
   addRealTrade, updateRealTrade, saveRealHolding, deleteRealHolding
 } from './db.js';
 import { decrypt } from './crypto.js';
-import { buildBuyTx, buildSellTx } from './pumpfun.js';
 import { buildPumpDevTransaction, sendViaJito, getTokenBalanceForWallet } from './pumpdev.js';
 import { getCachedBlockhash, getCachedBalance, invalidateBalance } from './cache.js';
 
@@ -66,21 +65,13 @@ async function executeTrade(swap, targetWalletAddress, mapping, execWallet, conn
 
     let signedTx;
     try {
-      // Fast path: build directly against pump.fun program (~100ms, just one RPC for bonding curve)
-      signedTx = await buildBuyTx(connection, keypair, swap.tokenMint, buySizeSol, slippagePct, blockhash);
-    } catch (err) {
-      if (!err.message.includes('GRADUATED')) throw err;
-      // Graduated token: fall back to PumpDev HTTP API
-      console.log(`[COPIER] Token graduated, using PumpDev fallback...`);
-      try {
-        signedTx = await buildPumpDevTransaction({
-          publicKey: execWallet.address, action: 'buy',
-          mint: swap.tokenMint, amount: buySizeSol,
-          denominatedInSol: true, slippagePct, priorityFeeSol: 0.003
-        });
-      } catch (pdErr) {
-        throw new Error(`PumpDev build failed: ${pdErr.message}`);
-      }
+      signedTx = await buildPumpDevTransaction({
+        publicKey: execWallet.address, action: 'buy',
+        mint: swap.tokenMint, amount: buySizeSol,
+        denominatedInSol: true, slippagePct, priorityFeeSol: 0.003
+      });
+    } catch (pdErr) {
+      throw new Error(`PumpDev build failed: ${pdErr.message}`);
     }
 
     // Submit via Jito — returns immediately, no confirmation wait
@@ -139,19 +130,13 @@ async function executeTrade(swap, targetWalletAddress, mapping, execWallet, conn
 
     let signedTx;
     try {
-      signedTx = await buildSellTx(connection, keypair, swap.tokenMint, rawAmount, slippagePct, blockhash);
-    } catch (err) {
-      if (!err.message.includes('GRADUATED')) throw err;
-      console.log(`[COPIER] Token graduated, using PumpDev fallback...`);
-      try {
-        signedTx = await buildPumpDevTransaction({
-          publicKey: execWallet.address, action: 'sell',
-          mint: swap.tokenMint, amount: '100%',
-          denominatedInSol: false, slippagePct, priorityFeeSol: 0.003
-        });
-      } catch (pdErr) {
-        throw new Error(`PumpDev build failed: ${pdErr.message}`);
-      }
+      signedTx = await buildPumpDevTransaction({
+        publicKey: execWallet.address, action: 'sell',
+        mint: swap.tokenMint, amount: rawAmount,
+        denominatedInSol: false, slippagePct, priorityFeeSol: 0.003
+      });
+    } catch (pdErr) {
+      throw new Error(`PumpDev build failed: ${pdErr.message}`);
     }
 
     let signature;
