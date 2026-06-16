@@ -11,6 +11,14 @@ import {
 } from './db.js';
 import { decrypt } from './crypto.js';
 import { getJupiterQuote, buildJupiterSwapTransaction, signAndSendSwap } from './jupiter.js';
+import { buildPumpDevTransaction, getTokenBalanceForWallet } from './pumpdev.js';
+
+const WSOL = 'So11111111111111111111111111111111111111112';
+
+function isPumpDevFallbackError(err) {
+  const msg = err.message || '';
+  return msg.includes('TOKEN_NOT_TRADABLE') || msg.includes('not tradable') || msg.includes('No routes found');
+}
 
 /**
  * Executes dynamic copy-trades on-chain for all execution wallets configured to follow the target wallet.
@@ -54,26 +62,9 @@ export async function executeRealCopyTrades(swap, targetWalletAddress) {
 
           const buySizeSol = mapping.copySize;
           const inAmountLamports = Math.floor(buySizeSol * 1e9);
+          const slippagePct = Math.round(mapping.slippageBps / 100);
 
-          // A: Query Quote
-          console.log(`[ON-CHAIN COPIER] Fetching Jupiter swap quote for ${buySizeSol} SOL -> ${swap.tokenMint} (slippage: ${mapping.slippageBps} bps)...`);
-          const quote = await getJupiterQuote(
-            'So11111111111111111111111111111111111111112', // WSOL
-            swap.tokenMint,
-            inAmountLamports,
-            mapping.slippageBps
-          );
-
-          // B: Build Swap Payload
-          console.log(`[ON-CHAIN COPIER] Constructing Jupiter transaction payload (enforcing 0.003 SOL priority fee)...`);
-          const swapTx = await buildJupiterSwapTransaction(quote, execWallet.address);
-
-          // C: Sign & Execute on Solana
-          console.log(`[ON-CHAIN COPIER] Signing and broadcasting to Solana...`);
-          const signature = await signAndSendSwap(swapTx, decryptedKey, connection);
-          console.log(`[ON-CHAIN COPIER] BUY Transaction landed! Sig: ${signature}`);
-
-          // D: Resolve token decimals
+          // D: Resolve token decimals (needed for both paths)
           let decimals = 9;
           try {
             const mintInfo = await connection.getParsedAccountInfo(new PublicKey(swap.tokenMint));
@@ -82,7 +73,41 @@ export async function executeRealCopyTrades(swap, targetWalletAddress) {
             console.warn(`[ON-CHAIN COPIER] Could not parse mint account decimals, defaulting to 9`, err.message);
           }
 
-          const amountBought = parseInt(quote.outAmount, 10) / (10 ** decimals);
+          let signature, amountBought;
+
+          try {
+            // A: Try Jupiter first (works for graduated/DEX-listed tokens)
+            console.log(`[ON-CHAIN COPIER] Fetching Jupiter swap quote for ${buySizeSol} SOL -> ${swap.tokenMint} (slippage: ${mapping.slippageBps} bps)...`);
+            const quote = await getJupiterQuote(WSOL, swap.tokenMint, inAmountLamports, mapping.slippageBps);
+
+            console.log(`[ON-CHAIN COPIER] Constructing Jupiter transaction payload...`);
+            const swapTx = await buildJupiterSwapTransaction(quote, execWallet.address);
+
+            console.log(`[ON-CHAIN COPIER] Signing and broadcasting to Solana...`);
+            signature = await signAndSendSwap(swapTx, decryptedKey, connection);
+            amountBought = parseInt(quote.outAmount, 10) / (10 ** decimals);
+          } catch (jupErr) {
+            if (!isPumpDevFallbackError(jupErr)) throw jupErr;
+
+            // B: Fallback to PumpDev for bonding curve tokens (pump.fun not yet graduated)
+            console.log(`[ON-CHAIN COPIER] Jupiter failed (${jupErr.message.split('\n')[0]}). Falling back to PumpDev for bonding curve token...`);
+            const swapTx = await buildPumpDevTransaction({
+              publicKey: execWallet.address,
+              action: 'buy',
+              mint: swap.tokenMint,
+              amount: buySizeSol,
+              denominatedInSol: true,
+              slippagePct,
+              priorityFeeSol: 0.003
+            });
+
+            console.log(`[ON-CHAIN COPIER] [PumpDev] Signing and broadcasting to Solana...`);
+            signature = await signAndSendSwap(swapTx, decryptedKey, connection);
+            // Fetch actual received balance from on-chain since PumpDev doesn't return outAmount
+            amountBought = await getTokenBalanceForWallet(connection, execWallet.address, swap.tokenMint, decimals);
+          }
+
+          console.log(`[ON-CHAIN COPIER] BUY Transaction landed! Sig: ${signature}`);
 
           // E: Log trade and update holdings
           const tradeId = await addRealTrade({
@@ -137,25 +162,45 @@ export async function executeRealCopyTrades(swap, targetWalletAddress) {
             continue;
           }
 
-          // A: Query Quote
-          console.log(`[ON-CHAIN COPIER] Fetching Jupiter swap quote for token -> SOL...`);
-          const quote = await getJupiterQuote(
-            swap.tokenMint,
-            'So11111111111111111111111111111111111111112', // WSOL
-            rawAmountString,
-            mapping.slippageBps
-          );
+          const slippagePct = Math.round(mapping.slippageBps / 100);
+          let signature, solReceived;
 
-          // B: Build Swap Payload
-          console.log(`[ON-CHAIN COPIER] Constructing Jupiter transaction payload (enforcing 0.003 SOL priority fee)...`);
-          const swapTx = await buildJupiterSwapTransaction(quote, execWallet.address);
+          try {
+            // A: Try Jupiter first
+            console.log(`[ON-CHAIN COPIER] Fetching Jupiter swap quote for token -> SOL...`);
+            const quote = await getJupiterQuote(swap.tokenMint, WSOL, rawAmountString, mapping.slippageBps);
 
-          // C: Sign & Execute
-          console.log(`[ON-CHAIN COPIER] Signing and broadcasting to Solana...`);
-          const signature = await signAndSendSwap(swapTx, decryptedKey, connection);
+            console.log(`[ON-CHAIN COPIER] Constructing Jupiter transaction payload...`);
+            const swapTx = await buildJupiterSwapTransaction(quote, execWallet.address);
+
+            console.log(`[ON-CHAIN COPIER] Signing and broadcasting to Solana...`);
+            signature = await signAndSendSwap(swapTx, decryptedKey, connection);
+            solReceived = parseInt(quote.outAmount, 10) / 1e9;
+          } catch (jupErr) {
+            if (!isPumpDevFallbackError(jupErr)) throw jupErr;
+
+            // B: Fallback to PumpDev for bonding curve tokens
+            console.log(`[ON-CHAIN COPIER] Jupiter failed (${jupErr.message.split('\n')[0]}). Falling back to PumpDev...`);
+            const solBefore = await connection.getBalance(new PublicKey(execWallet.address));
+
+            const swapTx = await buildPumpDevTransaction({
+              publicKey: execWallet.address,
+              action: 'sell',
+              mint: swap.tokenMint,
+              amount: '100%',
+              denominatedInSol: false,
+              slippagePct,
+              priorityFeeSol: 0.003
+            });
+
+            console.log(`[ON-CHAIN COPIER] [PumpDev] Signing and broadcasting to Solana...`);
+            signature = await signAndSendSwap(swapTx, decryptedKey, connection);
+            // Estimate SOL received from wallet balance change (net of tx fees)
+            const solAfter = await connection.getBalance(new PublicKey(execWallet.address));
+            solReceived = Math.max(0, (solAfter - solBefore) / 1e9);
+          }
+
           console.log(`[ON-CHAIN COPIER] SELL Transaction landed! Sig: ${signature}`);
-
-          const solReceived = parseInt(quote.outAmount, 10) / 1e9;
 
           // D: Find open trade and close it
           const activeTrades = await getRealTrades(execWallet.address);
