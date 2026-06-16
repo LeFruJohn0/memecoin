@@ -1059,10 +1059,10 @@ export default function Dashboard() {
                                   {h.amount.toLocaleString()}
                                 </td>
                                 <td className="px-6 py-4 text-center text-slate-300 font-semibold">
-                                  {h.solSpent.toFixed(4)} SOL
+                                  {h.solSpent != null ? h.solSpent.toFixed(4) : 'N/A'} SOL
                                 </td>
                                 <td className="px-6 py-4 text-center font-mono text-slate-400">
-                                  {h.entryPrice.toFixed(8)}
+                                  {h.entryPrice != null ? h.entryPrice.toFixed(8) : 'N/A'}
                                 </td>
                                 <td className="px-6 py-4 text-center text-xs text-slate-400">
                                   {new Date(h.entryTime).toLocaleString()}
@@ -1583,10 +1583,10 @@ export default function Dashboard() {
                                   {h.amount.toLocaleString()}
                                 </td>
                                 <td className="px-6 py-4 text-center text-slate-300 font-semibold">
-                                  {h.solSpent.toFixed(4)} SOL
+                                  {h.solSpent != null ? h.solSpent.toFixed(4) : 'N/A'} SOL
                                 </td>
                                 <td className="px-6 py-4 text-center font-mono text-slate-400">
-                                  {h.entryPrice.toFixed(8)}
+                                  {h.entryPrice != null ? h.entryPrice.toFixed(8) : 'N/A'}
                                 </td>
                                 <td className="px-6 py-4 text-center text-xs text-slate-400">
                                   {new Date(h.entryTime).toLocaleString()}
