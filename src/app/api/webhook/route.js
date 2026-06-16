@@ -186,8 +186,6 @@ export async function POST(req) {
         await executeRealCopyTrades(swap, targetWallet.address);
       }
     }
-
-    }
     })(); // end background processing closure
 
     // Fire-and-forget: don't await so Helius gets an immediate 200
