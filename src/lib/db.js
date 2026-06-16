@@ -111,6 +111,10 @@ export async function initDb() {
           encrypted_value TEXT NOT NULL,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS processed_signatures (
+          signature VARCHAR(120) PRIMARY KEY,
+          processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
       `);
 
       // Seed a default wallet if tables are empty
@@ -651,6 +655,32 @@ export async function saveRealHolding(executionWallet, mint, amount, solSpent, e
       entryTime: new Date(entryTime).toISOString()
     };
     writeLocalDb(data);
+  }
+}
+
+/**
+ * Marks a transaction signature as processed. Returns true if it was new (should process),
+ * false if it was already seen (duplicate — skip it).
+ */
+export async function markSignatureProcessed(signature) {
+  if (pool) {
+    try {
+      await pool.query(
+        'INSERT INTO processed_signatures (signature) VALUES ($1)',
+        [signature]
+      );
+      return true; // newly inserted — process it
+    } catch (err) {
+      if (err.code === '23505') return false; // unique violation — duplicate, skip
+      throw err;
+    }
+  } else {
+    const data = readLocalDb();
+    if (!data.processedSignatures) data.processedSignatures = {};
+    if (data.processedSignatures[signature]) return false;
+    data.processedSignatures[signature] = Date.now();
+    writeLocalDb(data);
+    return true;
   }
 }
 

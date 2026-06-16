@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Connection } from '@solana/web3.js';
-import { initDb, getWallets, getPortfolio, updatePortfolio, getHoldings, saveHolding, deleteHolding, addTrade } from '../../../lib/db.js';
+import { initDb, getWallets, getPortfolio, updatePortfolio, getHoldings, saveHolding, deleteHolding, addTrade, markSignatureProcessed } from '../../../lib/db.js';
 import { getTransactionWithRetry, parseTransactionSwaps } from '../../../../cli/parser.js';
 import { executeRealCopyTrades } from '../../../lib/execution.js';
 
@@ -28,6 +28,13 @@ export async function POST(req) {
     for (const txData of payload) {
       const { signature } = txData;
       if (!signature) continue;
+
+      // Deduplicate: skip if this signature was already processed (Helius at-least-once delivery)
+      const isNew = await markSignatureProcessed(signature);
+      if (!isNew) {
+        console.log(`[WEBHOOK] Duplicate signature detected, skipping: ${signature}`);
+        continue;
+      }
 
       // Find which of our tracked wallets is involved in the transaction accounts or feepayer
       const targetWallet = trackedWallets.find(w => {

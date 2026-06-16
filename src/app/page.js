@@ -1108,7 +1108,7 @@ export default function Dashboard() {
                                     {isWin ? '+' : ''}{t.pnlPercent.toFixed(2)}%
                                   </td>
                                   <td className="px-6 py-4 text-center text-slate-450 font-medium">
-                                    {(t.sellFraction * 100).toFixed(0)}%
+                                    100%
                                   </td>
                                   <td className="px-6 py-4 text-center text-xs text-slate-400">
                                     {new Date(t.sellTime).toLocaleString()}
