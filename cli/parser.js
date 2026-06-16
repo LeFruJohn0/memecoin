@@ -137,3 +137,52 @@ export function parseTransactionSwaps(tx, walletAddressStr) {
 
   return swaps.length > 0 ? swaps : null;
 }
+
+/**
+ * Fast path: parse swap directly from Helius webhook payload.
+ * Avoids the getTransactionWithRetry RPC call entirely.
+ * Returns same shape as parseTransactionSwaps, or null if data is insufficient.
+ */
+export function parseSwapFromHeliusPayload(txData, walletAddressStr) {
+  const accountData = txData.accountData || [];
+  const walletData = accountData.find(a => a.account === walletAddressStr);
+  if (!walletData) return null;
+
+  const nativeChangeSol = (walletData.nativeBalanceChange || 0) / 1e9;
+  const tokenChanges = (walletData.tokenBalanceChanges || [])
+    .filter(t => t.mint !== WSOL_MINT);
+
+  if (tokenChanges.length === 0) return null;
+
+  const swaps = [];
+  for (const tc of tokenChanges) {
+    const decimals = tc.rawTokenAmount?.decimals ?? 9;
+    const rawAmount = parseFloat(tc.rawTokenAmount?.tokenAmount || '0');
+    const uiChange = rawAmount / (10 ** decimals);
+    if (uiChange === 0) continue;
+
+    if (nativeChangeSol < -0.0005 && uiChange > 0) {
+      swaps.push({
+        type: 'buy',
+        tokenMint: tc.mint,
+        solAmount: Math.abs(nativeChangeSol),
+        tokenAmount: uiChange,
+        walletSolBalanceBefore: null, // not available in payload; execution.js uses live balance
+        blockTime: txData.timestamp || Math.floor(Date.now() / 1000),
+        txHash: txData.signature
+      });
+    } else if (nativeChangeSol > 0.0005 && uiChange < 0) {
+      swaps.push({
+        type: 'sell',
+        tokenMint: tc.mint,
+        solAmount: nativeChangeSol,
+        tokenAmount: Math.abs(uiChange),
+        walletSolBalanceBefore: null,
+        blockTime: txData.timestamp || Math.floor(Date.now() / 1000),
+        txHash: txData.signature
+      });
+    }
+  }
+
+  return swaps.length > 0 ? swaps : null;
+}
