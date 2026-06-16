@@ -808,6 +808,16 @@ export default function Dashboard() {
                         <option value="1000">10%</option>
                         <option value="1500">15%</option>
                         <option value="2000">20%</option>
+                        <option value="2500">25%</option>
+                        <option value="3000">30%</option>
+                        <option value="4000">40%</option>
+                        <option value="5000">50%</option>
+                        <option value="6000">60%</option>
+                        <option value="7000">70%</option>
+                        <option value="8000">80%</option>
+                        <option value="9000">90%</option>
+                        <option value="9900">99%</option>
+                        <option value="10000">100%</option>
                       </select>
                     </div>
                   </div>

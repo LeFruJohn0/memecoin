@@ -25,6 +25,8 @@ export async function POST(req) {
 
     const txFeeSol = 0.0005; // Standard fee
 
+    // Respond to Helius immediately to prevent timeout retries, process trades in background
+    const processingPromise = (async () => {
     for (const txData of payload) {
       const { signature } = txData;
       if (!signature) continue;
@@ -185,7 +187,13 @@ export async function POST(req) {
       }
     }
 
-    return NextResponse.json({ success: true, message: 'Webhook processed.' });
+    }
+    })(); // end background processing closure
+
+    // Fire-and-forget: don't await so Helius gets an immediate 200
+    processingPromise.catch(err => console.error('[WEBHOOK BACKGROUND ERROR]', err.message));
+
+    return NextResponse.json({ success: true, message: 'Webhook received.' });
   } catch (err) {
     console.error('[WEBHOOK API ERROR] POST failed:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

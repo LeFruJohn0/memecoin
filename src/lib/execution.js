@@ -64,6 +64,14 @@ export async function executeRealCopyTrades(swap, targetWalletAddress) {
           const inAmountLamports = Math.floor(buySizeSol * 1e9);
           const slippagePct = Math.round(mapping.slippageBps / 100);
 
+          // Pre-check: ensure execution wallet has enough SOL (copySize + ~0.005 for fees)
+          const walletBalance = await connection.getBalance(new PublicKey(execWallet.address));
+          const walletBalanceSol = walletBalance / 1e9;
+          if (walletBalanceSol < buySizeSol + 0.005) {
+            console.warn(`[ON-CHAIN COPIER] Skipping BUY — insufficient SOL in "${execWallet.name}": ${walletBalanceSol.toFixed(4)} SOL (need ${(buySizeSol + 0.005).toFixed(4)} SOL)`);
+            continue;
+          }
+
           // D: Resolve token decimals (needed for both paths)
           let decimals = 9;
           try {
