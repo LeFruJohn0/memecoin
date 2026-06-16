@@ -106,6 +106,11 @@ export async function initDb() {
           sell_tx VARCHAR(100),
           status VARCHAR(20) DEFAULT 'OPEN'
         );
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key VARCHAR(100) PRIMARY KEY,
+          encrypted_value TEXT NOT NULL,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
       `);
 
       // Seed a default wallet if tables are empty
@@ -645,6 +650,37 @@ export async function saveRealHolding(executionWallet, mint, amount, solSpent, e
       entryPrice,
       entryTime: new Date(entryTime).toISOString()
     };
+    writeLocalDb(data);
+  }
+}
+
+/**
+ * Retrieves an encrypted app setting by key. Returns null if not set.
+ */
+export async function getAppSetting(key) {
+  if (pool) {
+    const res = await pool.query('SELECT encrypted_value FROM app_settings WHERE key = $1', [key]);
+    return res.rows.length > 0 ? res.rows[0].encrypted_value : null;
+  } else {
+    const data = readLocalDb();
+    return data.appSettings?.[key] ?? null;
+  }
+}
+
+/**
+ * Saves or updates an encrypted app setting.
+ */
+export async function setAppSetting(key, encryptedValue) {
+  if (pool) {
+    await pool.query(`
+      INSERT INTO app_settings (key, encrypted_value, updated_at)
+      VALUES ($1, $2, CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO UPDATE SET encrypted_value = $2, updated_at = CURRENT_TIMESTAMP
+    `, [key, encryptedValue]);
+  } else {
+    const data = readLocalDb();
+    if (!data.appSettings) data.appSettings = {};
+    data.appSettings[key] = encryptedValue;
     writeLocalDb(data);
   }
 }

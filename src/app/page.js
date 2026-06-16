@@ -61,6 +61,11 @@ export default function Dashboard() {
   const [newExecPrivateKey, setNewExecPrivateKey] = useState('');
   const [importExecLoading, setImportExecLoading] = useState(false);
 
+  // PumpDev API key
+  const [pumpDevKey, setPumpDevKey] = useState('');
+  const [pumpDevKeyConfigured, setPumpDevKeyConfigured] = useState(false);
+  const [pumpDevKeyLoading, setPumpDevKeyLoading] = useState(false);
+
   // Copy Settings Mapping inputs
   const [mappingTarget, setMappingTarget] = useState('');
   const [mappingExec, setMappingExec] = useState('');
@@ -102,6 +107,11 @@ export default function Dashboard() {
             setSelectedExecWallet(execData.wallets[0]);
           }
         }
+
+        // Check if PumpDev API key is already saved
+        const pdRes = await fetch('/api/app-settings?key=pumpdev_api_key');
+        const pdData = await pdRes.json();
+        if (pdData.success) setPumpDevKeyConfigured(pdData.configured);
 
         // Fetch settings mappings
         const settingsRes = await fetch('/api/copy-settings');
@@ -277,6 +287,31 @@ export default function Dashboard() {
       setError(err.message);
     } finally {
       setImportExecLoading(false);
+    }
+  }
+
+  async function handleSavePumpDevKey(e) {
+    e.preventDefault();
+    if (!pumpDevKey) return;
+    setPumpDevKeyLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/app-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'pumpdev_api_key', value: pumpDevKey })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPumpDevKeyConfigured(true);
+        setPumpDevKey('');
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPumpDevKeyLoading(false);
     }
   }
 
@@ -628,6 +663,42 @@ export default function Dashboard() {
                         <Plus className="h-3.5 w-3.5 text-slate-950" />
                         <span>Import Wallet</span>
                       </>
+                    )}
+                  </button>
+                </form>
+              </div>
+
+              {/* PumpDev API Key */}
+              <div className="glass-panel rounded-xl p-4">
+                <h2 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center space-x-2">
+                  <Key className="h-4 w-4 text-indigo-400" />
+                  <span>PumpDev API Key</span>
+                  {pumpDevKeyConfigured && (
+                    <span className="ml-auto text-[10px] font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-2 py-0.5 rounded-full">Configured</span>
+                  )}
+                </h2>
+                <form onSubmit={handleSavePumpDevKey} className="space-y-3">
+                  <div>
+                    <input
+                      type="password"
+                      placeholder={pumpDevKeyConfigured ? '••••••••••••• (update key)' : 'Paste your PumpDev API key'}
+                      value={pumpDevKey}
+                      onChange={(e) => setPumpDevKey(e.target.value)}
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500 font-mono"
+                    />
+                    <span className="text-[10px] text-slate-500 block mt-1 leading-normal italic">
+                      Used as fallback for bonding curve tokens Jupiter can&apos;t trade. Encrypted with AES-256-GCM.
+                    </span>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={pumpDevKeyLoading || !pumpDevKey}
+                    className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-slate-950 font-bold py-2 rounded-lg transition-all text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-indigo-500/10 disabled:opacity-40"
+                  >
+                    {pumpDevKeyLoading ? (
+                      <Loader2 className="h-3 w-3 animate-spin text-slate-950" />
+                    ) : (
+                      <span>{pumpDevKeyConfigured ? 'Update Key' : 'Save Key'}</span>
                     )}
                   </button>
                 </form>

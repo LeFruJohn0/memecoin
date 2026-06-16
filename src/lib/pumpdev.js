@@ -1,7 +1,22 @@
 import { Keypair, VersionedTransaction, Connection } from '@solana/web3.js';
 import bs58 from 'bs58';
+import { getAppSetting } from './db.js';
+import { decrypt } from './crypto.js';
 
 const PUMPDEV_API = 'https://pumpdev.io/api/trade-local';
+
+async function getPumpDevApiKey() {
+  // Prefer DB-stored encrypted key, fall back to env var
+  try {
+    const encrypted = await getAppSetting('pumpdev_api_key');
+    if (encrypted) return decrypt(encrypted);
+  } catch {
+    // fall through to env var
+  }
+  const envKey = process.env.PUMPDEV_API_KEY;
+  if (envKey && envKey !== 'REPLACE_WITH_YOUR_REGENERATED_KEY') return envKey;
+  throw new Error('PumpDev API key is not configured. Add it in the sidebar under API Keys.');
+}
 
 /**
  * Builds a buy or sell transaction via PumpDev's trade-local endpoint.
@@ -27,8 +42,7 @@ export async function buildPumpDevTransaction({
   slippagePct = 10,
   priorityFeeSol = 0.003
 }) {
-  const apiKey = process.env.PUMPDEV_API_KEY;
-  if (!apiKey) throw new Error('PUMPDEV_API_KEY environment variable is not set');
+  const apiKey = await getPumpDevApiKey();
 
   const res = await fetch(PUMPDEV_API, {
     method: 'POST',
