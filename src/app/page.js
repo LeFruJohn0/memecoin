@@ -352,7 +352,7 @@ export default function Dashboard() {
 
   async function handleAddMapping(e) {
     e.preventDefault();
-    if (!mappingTarget || !mappingExec || !mappingSize) return;
+    if (!mappingTarget || !mappingExec || !mappingMinSize || !mappingMaxSize) return;
     setSaveMappingLoading(true);
     setError(null);
 
