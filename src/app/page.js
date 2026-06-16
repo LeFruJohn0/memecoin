@@ -37,7 +37,8 @@ export default function Dashboard() {
   // Page states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('positions'); // positions, trades, sandbox
+  const [activeTab, setActiveTab] = useState('positions'); // positions, trades, sandbox, activity
+  const [executionLog, setExecutionLog] = useState([]);
 
   // Add wallet inputs
   const [newWalletAddress, setNewWalletAddress] = useState('');
@@ -193,6 +194,21 @@ export default function Dashboard() {
       loadRealPortfolio(true);
     }
   }, [selectedExecWallet, dashboardMode]);
+
+  // Poll execution log every 3s when in live mode
+  useEffect(() => {
+    if (dashboardMode !== 'live') return;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/execution-log');
+        const data = await res.json();
+        setExecutionLog(data);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => clearInterval(id);
+  }, [dashboardMode]);
 
   // Actions
   async function handleAddWallet(e) {
@@ -1536,12 +1552,27 @@ export default function Dashboard() {
                   <button
                     onClick={() => setActiveTab('sandbox')}
                     className={`px-5 py-3 font-semibold text-sm transition-colors border-b-2 ${
-                      activeTab === 'sandbox' 
-                        ? 'border-cyan-400 text-cyan-400 bg-cyan-950/5' 
+                      activeTab === 'sandbox'
+                        ? 'border-cyan-400 text-cyan-400 bg-cyan-950/5'
                         : 'border-transparent text-slate-400 hover:text-slate-200'
                     }`}
                   >
                     Active Mappings ({copySettings.filter(s => s.executionWallet === selectedExecWallet.address).length})
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('activity')}
+                    className={`px-5 py-3 font-semibold text-sm transition-colors border-b-2 flex items-center gap-2 ${
+                      activeTab === 'activity'
+                        ? 'border-amber-400 text-amber-400 bg-amber-950/5'
+                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Activity Log
+                    {executionLog.length > 0 && (
+                      <span className="bg-amber-500 text-black text-[10px] font-black rounded-full px-1.5 py-0.5 leading-none">
+                        {executionLog.length}
+                      </span>
+                    )}
                   </button>
                 </div>
 
@@ -1705,6 +1736,69 @@ export default function Dashboard() {
                   )}
 
                   {/* Tab 3: Active Mappings configurations */}
+                  {/* Activity Log Tab */}
+                  {activeTab === 'activity' && (
+                    <div className="glass-panel rounded-2xl overflow-hidden border border-slate-800">
+                      <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Execution Activity</h3>
+                        <span className="text-xs text-slate-500">Auto-refreshes every 3s</span>
+                      </div>
+                      {executionLog.length === 0 ? (
+                        <div className="p-12 text-center text-slate-500 text-sm italic">
+                          No activity yet. Waiting for trades...
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-800/60">
+                          {executionLog.map((ev, i) => {
+                            const time = new Date(ev.ts).toLocaleTimeString();
+                            const mintShort = ev.mint ? ev.mint.slice(0, 8) + '...' : '';
+                            const sigShort = ev.sig ? ev.sig.slice(0, 12) + '...' : null;
+
+                            const config = {
+                              BUY_SENT:          { label: 'BUY Sent',           color: 'text-green-400',  bg: 'bg-green-950/30', border: 'border-green-900/40' },
+                              SELL_SENT:         { label: 'SELL Sent',          color: 'text-red-400',    bg: 'bg-red-950/30',   border: 'border-red-900/40' },
+                              SCALP_SKIPPED:     { label: 'Scalp — Skipped',    color: 'text-amber-400',  bg: 'bg-amber-950/30', border: 'border-amber-900/40' },
+                              SCALP_SELL_QUEUED: { label: 'Scalp — Buy+Sell',   color: 'text-orange-400', bg: 'bg-orange-950/30',border: 'border-orange-900/40' },
+                              SELL_PARKED:       { label: 'Sell Parked',        color: 'text-yellow-400', bg: 'bg-yellow-950/20',border: 'border-yellow-900/40' },
+                            }[ev.type] || { label: ev.type, color: 'text-slate-400', bg: 'bg-slate-900/30', border: 'border-slate-800' };
+
+                            return (
+                              <div key={i} className={`px-6 py-4 ${config.bg} border-l-2 ${config.border}`}>
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="flex items-center gap-3">
+                                    <span className={`text-xs font-black uppercase tracking-wider ${config.color}`}>{config.label}</span>
+                                    {ev.wallet && <span className="text-xs text-slate-400 font-semibold">{ev.wallet}</span>}
+                                    {ev.scenario && (
+                                      <span className="text-[10px] font-bold bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded-md">
+                                        Scenario {ev.scenario}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[11px] text-slate-500 font-mono">{time}</span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 mt-1">
+                                  {mintShort && <span className="font-mono">{mintShort}</span>}
+                                  {ev.solAmount != null && <span className="text-green-300 font-semibold">{ev.solAmount.toFixed(4)} SOL</span>}
+                                  {ev.ms != null && <span className="text-cyan-400 font-mono">{ev.ms}ms</span>}
+                                  {sigShort && (
+                                    <a
+                                      href={`https://solscan.io/tx/${ev.sig}`}
+                                      target="_blank" rel="noopener noreferrer"
+                                      className="font-mono text-slate-500 hover:text-cyan-400 underline underline-offset-2 transition-colors"
+                                    >
+                                      {sigShort}
+                                    </a>
+                                  )}
+                                  {ev.detail && <span className="text-slate-500 italic">{ev.detail}</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {activeTab === 'sandbox' && (
                     <div className="glass-panel rounded-2xl overflow-hidden border border-slate-800 p-6">
                       <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4">
