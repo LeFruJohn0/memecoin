@@ -72,15 +72,24 @@ async function executeTrade(swap, targetWalletAddress, mapping, execWallet, conn
       if (!err.message.includes('GRADUATED')) throw err;
       // Graduated token: fall back to PumpDev HTTP API
       console.log(`[COPIER] Token graduated, using PumpDev fallback...`);
-      signedTx = await buildPumpDevTransaction({
-        publicKey: execWallet.address, action: 'buy',
-        mint: swap.tokenMint, amount: buySizeSol,
-        denominatedInSol: true, slippagePct, priorityFeeSol: 0.003
-      });
+      try {
+        signedTx = await buildPumpDevTransaction({
+          publicKey: execWallet.address, action: 'buy',
+          mint: swap.tokenMint, amount: buySizeSol,
+          denominatedInSol: true, slippagePct, priorityFeeSol: 0.003
+        });
+      } catch (pdErr) {
+        throw new Error(`PumpDev build failed: ${pdErr.message}`);
+      }
     }
 
     // Submit via Jito — returns immediately, no confirmation wait
-    const signature = await sendViaJito(signedTx, keypair, connection);
+    let signature;
+    try {
+      signature = await sendViaJito(signedTx, keypair, connection);
+    } catch (jitoErr) {
+      throw new Error(`Jito submit failed: ${jitoErr.message}`);
+    }
     invalidateBalance(keypair.publicKey.toString());
     console.log(`[COPIER] BUY sent in ${Date.now() - t0}ms | sig: ${signature}`);
 
@@ -134,14 +143,23 @@ async function executeTrade(swap, targetWalletAddress, mapping, execWallet, conn
     } catch (err) {
       if (!err.message.includes('GRADUATED')) throw err;
       console.log(`[COPIER] Token graduated, using PumpDev fallback...`);
-      signedTx = await buildPumpDevTransaction({
-        publicKey: execWallet.address, action: 'sell',
-        mint: swap.tokenMint, amount: '100%',
-        denominatedInSol: false, slippagePct, priorityFeeSol: 0.003
-      });
+      try {
+        signedTx = await buildPumpDevTransaction({
+          publicKey: execWallet.address, action: 'sell',
+          mint: swap.tokenMint, amount: '100%',
+          denominatedInSol: false, slippagePct, priorityFeeSol: 0.003
+        });
+      } catch (pdErr) {
+        throw new Error(`PumpDev build failed: ${pdErr.message}`);
+      }
     }
 
-    const signature = await sendViaJito(signedTx, keypair, connection);
+    let signature;
+    try {
+      signature = await sendViaJito(signedTx, keypair, connection);
+    } catch (jitoErr) {
+      throw new Error(`Jito submit failed: ${jitoErr.message}`);
+    }
     invalidateBalance(keypair.publicKey.toString());
     console.log(`[COPIER] SELL sent in ${Date.now() - t0}ms | sig: ${signature}`);
 
